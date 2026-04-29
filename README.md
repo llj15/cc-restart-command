@@ -5,13 +5,13 @@ current Claude Code process and resumes the same session when possible.
 
 ## What It Installs
 
-- `~/.local/bin/claude-restart-current`
+- `~/.local/bin/claude-restart`
+  - Single script handling both the slash-command path and `UserPromptSubmit`
+    hook fast path (dispatched via `--hook`).
   - Finds the current Claude Code process in the parent process chain.
+  - Looks up the session id from `~/.claude/sessions/<pid>.json`.
   - Writes a PID-scoped restart marker.
   - Terminates Claude so the shell wrapper can relaunch it.
-- `~/.local/bin/claude-restart-prompt-hook`
-  - Optional fast path for `UserPromptSubmit`.
-  - Intercepts an exact `/restart` or `restart` prompt before the model thinks.
 - `~/.claude/commands/restart.md`
   - Fallback slash command implementation.
 - `~/.claude/claude-restart-wrapper.zsh`
@@ -37,8 +37,16 @@ cc
 
 - If the current session id is known, `/restart` resumes that same session.
 - If the session is still empty and no session id exists, `/restart` starts fresh.
-- It will not fall back to an old "latest" session unless the transcript was
-  updated very recently.
+- The hook only intercepts `/restart` — a bare `restart` is passed through to
+  the model as a normal prompt.
+
+## Debugging
+
+Set `CLAUDE_RESTART_LOG` to enable hook tracing:
+
+```sh
+export CLAUDE_RESTART_LOG=/tmp/claude-restart.log
+```
 
 ## Notes
 

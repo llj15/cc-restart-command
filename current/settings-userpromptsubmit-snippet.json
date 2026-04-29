@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.local/bin/claude-restart-prompt-hook"
+            "command": "~/.local/bin/claude-restart --hook"
           }
         ]
       }
