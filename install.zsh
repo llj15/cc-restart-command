@@ -7,11 +7,11 @@ claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 bin_dir="$HOME/.local/bin"
 zshrc="$HOME/.zshrc"
 wrapper="$claude_dir/claude-restart-wrapper.zsh"
+hook_command="$bin_dir/claude-restart --hook"
 
 mkdir -p "$bin_dir" "$claude_dir/commands"
 
-install -m 755 "$repo_dir/current/bin/claude-restart-current" "$bin_dir/claude-restart-current"
-install -m 755 "$repo_dir/current/bin/claude-restart-prompt-hook" "$bin_dir/claude-restart-prompt-hook"
+install -m 755 "$repo_dir/current/bin/claude-restart" "$bin_dir/claude-restart"
 install -m 644 "$repo_dir/current/commands/restart.md" "$claude_dir/commands/restart.md"
 install -m 644 "$repo_dir/current/claude-restart-wrapper.zsh" "$wrapper"
 
@@ -35,8 +35,13 @@ do
   if [[ -f "$settings" ]]; then
     python3 "$repo_dir/scripts/merge-userprompt-hook.py" \
       "$settings" \
-      "$bin_dir/claude-restart-prompt-hook"
+      "$hook_command"
   fi
+done
+
+# Clean up stale binaries from previous two-script installs
+for stale in "$bin_dir/claude-restart-current" "$bin_dir/claude-restart-prompt-hook"; do
+  [[ -f "$stale" ]] && rm -f "$stale" && print "Removed stale: $stale"
 done
 
 print "Installed Claude Code /restart support."

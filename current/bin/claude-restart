@@ -1,0 +1,150 @@
+#!/usr/bin/env zsh
+
+set -u
+setopt no_bg_nice 2>/dev/null || true
+
+find_current_claude_pid() {
+  local pid pp comm args
+  pid=$$
+
+  while true; do
+    pp=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    case "$pp" in
+      ""|0|1) return 1 ;;
+    esac
+
+    comm=$(ps -o comm= -p "$pp" 2>/dev/null)
+    args=$(ps -o args= -p "$pp" 2>/dev/null)
+
+    if [[ "${comm:t}" == "claude" || "$args" == "claude" || "$args" == "claude "* || "$args" == */claude || "$args" == */claude" "* ]]; then
+      print -r -- "$pp"
+      return 0
+    fi
+
+    pid=$pp
+  done
+}
+
+current_session_id() {
+  local target=$1
+  local sid registry
+
+  sid="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+  if [[ -n "$sid" ]]; then
+    print -r -- "$sid"
+    return 0
+  fi
+
+  registry="$HOME/.claude/sessions/${target}.json"
+  if [[ -r "$registry" ]]; then
+    sid=$(grep -o '"sessionId":"[^"]*"' "$registry" 2>/dev/null | head -1 | sed 's/.*"sessionId":"//; s/"$//')
+    if [[ -n "$sid" ]]; then
+      print -r -- "$sid"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+restart_claude() {
+  local target flag managed_restart launcher sid marker
+
+  target=$(find_current_claude_pid) || {
+    print -u2 -- "claude not found in ancestor chain"
+    return 1
+  }
+
+  flag="${CLAUDE_RESTART_FLAG:-}"
+  managed_restart=1
+  if [[ -z "$flag" ]]; then
+    managed_restart=0
+    launcher=$(ps -o ppid= -p "$target" 2>/dev/null | tr -d ' ')
+    [[ -n "$launcher" ]] || {
+      print -u2 -- "claude launcher not found"
+      return 1
+    }
+    flag="${TMPDIR:-/tmp}/claude-code-restart/${launcher}.restart"
+  fi
+
+  mkdir -p "${flag:h}" 2>/dev/null
+  sid=$(current_session_id "$target" 2>/dev/null || true)
+  if [[ -n "$sid" ]]; then
+    marker="resume:${sid}"
+  else
+    marker="fresh"
+  fi
+
+  print -r -- "$marker" >| "$flag" || {
+    print -u2 -- "failed to write restart marker: $flag"
+    return 1
+  }
+
+  if [[ "$managed_restart" -eq 0 ]]; then
+    if [[ "$marker" == "fresh" ]]; then
+      kill -TERM "$target" 2>/dev/null || {
+        rm -f "$flag" 2>/dev/null
+        print -u2 -- "failed to signal claude pid $target"
+        return 1
+      }
+      print -r -- "Closed empty Claude Code session. Start cc again after loading the updated shell wrapper."
+      return 0
+    fi
+
+    kill -KILL "$target" 2>/dev/null || {
+      rm -f "$flag" 2>/dev/null
+      print -u2 -- "failed to signal claude pid $target"
+      return 1
+    }
+    print -r -- "Restarting Claude Code..."
+    return 0
+  fi
+
+  (
+    sleep "${CLAUDE_RESTART_FORCE_AFTER:-3}"
+    kill -0 "$target" 2>/dev/null && kill -KILL "$target" 2>/dev/null
+  ) >/dev/null 2>&1 &!
+
+  kill -TERM "$target" 2>/dev/null || {
+    rm -f "$flag" 2>/dev/null
+    print -u2 -- "failed to signal claude pid $target"
+    return 1
+  }
+
+  print -r -- "Restarting Claude Code..."
+}
+
+handle_hook() {
+  local input="" prompt="" session_id=""
+
+  if [[ ! -t 0 ]]; then
+    input=$(cat 2>/dev/null || true)
+  fi
+
+  if [[ -n "$input" ]] && command -v jq >/dev/null 2>&1; then
+    local event
+    event=$(print -rn -- "$input" | jq -r '.hook_event_name // empty' 2>/dev/null)
+    [[ -z "$event" || "$event" == "UserPromptSubmit" ]] || return 0
+
+    prompt=$(print -rn -- "$input" | jq -r '.user_prompt // empty' 2>/dev/null)
+    session_id=$(print -rn -- "$input" | jq -r '.session_id // empty' 2>/dev/null)
+  fi
+
+  prompt="${prompt#"${prompt%%[![:space:]]*}"}"
+  prompt="${prompt%"${prompt##*[![:space:]]}"}"
+
+  case "$prompt" in
+    /restart|/restart\ *)
+      if CLAUDE_SESSION_ID="$session_id" restart_claude >> "${CLAUDE_RESTART_LOG:-/dev/null}" 2>&1; then
+        print -r -- '{"continue":false,"suppressOutput":true}'
+      fi
+      ;;
+  esac
+}
+
+if [[ "${1:-}" == "--hook" ]]; then
+  handle_hook
+  exit 0
+fi
+
+restart_claude

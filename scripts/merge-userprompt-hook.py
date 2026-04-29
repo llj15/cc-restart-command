@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+STALE_SUFFIXES = ("claude-restart-prompt-hook", "claude-restart-current")
+
 
 def main() -> int:
     if len(sys.argv) != 3:
@@ -29,7 +31,14 @@ def main() -> int:
 
     first_hooks[:] = [
         h for h in first_hooks
-        if not (isinstance(h, dict) and h.get("command") == hook_command)
+        if not (
+            isinstance(h, dict)
+            and isinstance(h.get("command"), str)
+            and (
+                h["command"] == hook_command
+                or h["command"].rstrip().endswith(STALE_SUFFIXES)
+            )
+        )
     ]
     first_hooks.insert(0, hook)
 
