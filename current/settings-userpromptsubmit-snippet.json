@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/claude-restart-prompt-hook"
+          }
+        ]
+      }
+    ]
+  }
+}

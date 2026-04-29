@@ -1,0 +1,118 @@
+#!/usr/bin/env zsh
+
+set -u
+setopt no_bg_nice 2>/dev/null || true
+
+find_current_claude_pid() {
+  local pid pp comm args
+  pid=$$
+
+  while true; do
+    pp=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    case "$pp" in
+      ""|0|1) return 1 ;;
+    esac
+
+    comm=$(ps -o comm= -p "$pp" 2>/dev/null)
+    args=$(ps -o args= -p "$pp" 2>/dev/null)
+
+    if [[ "${comm:t}" == "claude" || "$args" == "claude" || "$args" == "claude "* || "$args" == */claude || "$args" == */claude" "* ]]; then
+      print -r -- "$pp"
+      return 0
+    fi
+
+    pid=$pp
+  done
+}
+
+current_session_id() {
+  local target=$1
+  local sid dir latest now mtime
+
+  sid="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+  if [[ -n "$sid" ]]; then
+    print -r -- "$sid"
+    return 0
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    sid=$(lsof -Fn -p "$target" 2>/dev/null | sed -n 's#^n.*/\.claude/projects/.*/\([^/]*\)\.jsonl$#\1#p' | head -n 1)
+    if [[ -n "$sid" ]]; then
+      print -r -- "$sid"
+      return 0
+    fi
+  fi
+
+  dir="$HOME/.claude/projects/$(print -r -- "$PWD" | tr '/' '-')"
+  latest=$(ls -t "$dir"/*.jsonl(N) 2>/dev/null | head -n 1)
+  [[ -n "$latest" ]] || return 1
+
+  now=$(date +%s)
+  mtime=$(stat -f '%m' "$latest" 2>/dev/null || true)
+  [[ -n "$mtime" && $((now - mtime)) -le ${CLAUDE_RESTART_RECENT_SECONDS:-20} ]] || return 1
+
+  print -r -- "${latest:t:r}"
+}
+
+target=$(find_current_claude_pid) || {
+  print -u2 -- "claude not found in ancestor chain"
+  exit 1
+}
+
+flag="${CLAUDE_RESTART_FLAG:-}"
+managed_restart=1
+if [[ -z "$flag" ]]; then
+  managed_restart=0
+  launcher=$(ps -o ppid= -p "$target" 2>/dev/null | tr -d ' ')
+  [[ -n "$launcher" ]] || {
+    print -u2 -- "claude launcher not found"
+    exit 1
+  }
+  flag="${TMPDIR:-/tmp}/claude-code-restart/${launcher}.restart"
+fi
+
+mkdir -p "${flag:h}" 2>/dev/null
+sid=$(current_session_id "$target" 2>/dev/null || true)
+if [[ -n "$sid" ]]; then
+  marker="resume:${sid}"
+else
+  marker="fresh"
+fi
+
+print -r -- "$marker" >| "$flag" || {
+  print -u2 -- "failed to write restart marker: $flag"
+  exit 1
+}
+
+if [[ "$managed_restart" -eq 0 ]]; then
+  if [[ "$marker" == "fresh" ]]; then
+    kill -TERM "$target" 2>/dev/null || {
+      rm -f "$flag" 2>/dev/null
+      print -u2 -- "failed to signal claude pid $target"
+      exit 1
+    }
+    print -r -- "Closed empty Claude Code session. Start cc again after loading the updated shell wrapper."
+    exit 0
+  fi
+
+  kill -KILL "$target" 2>/dev/null || {
+    rm -f "$flag" 2>/dev/null
+    print -u2 -- "failed to signal claude pid $target"
+    exit 1
+  }
+  print -r -- "Restarting Claude Code..."
+  exit 0
+fi
+
+(
+  sleep "${CLAUDE_RESTART_FORCE_AFTER:-3}"
+  kill -0 "$target" 2>/dev/null && kill -KILL "$target" 2>/dev/null
+) >/dev/null 2>&1 &!
+
+kill -TERM "$target" 2>/dev/null || {
+  rm -f "$flag" 2>/dev/null
+  print -u2 -- "failed to signal claude pid $target"
+  exit 1
+}
+
+print -r -- "Restarting Claude Code..."

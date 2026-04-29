@@ -1,0 +1,26 @@
+#!/usr/bin/env zsh
+
+set -u
+
+input=$(cat)
+prompt="${USER_PROMPT:-}"
+session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+
+if [[ -z "$prompt" ]] && command -v jq >/dev/null 2>&1; then
+  prompt=$(print -rn -- "$input" | jq -r '.user_prompt // empty' 2>/dev/null)
+fi
+
+if [[ -z "$session_id" ]] && command -v jq >/dev/null 2>&1; then
+  session_id=$(print -rn -- "$input" | jq -r '.session_id // empty' 2>/dev/null)
+fi
+
+prompt="${prompt#"${prompt%%[![:space:]]*}"}"
+prompt="${prompt%"${prompt##*[![:space:]]}"}"
+
+case "$prompt" in
+  /restart|restart)
+    if CLAUDE_SESSION_ID="$session_id" "$HOME/.local/bin/claude-restart-current" >/dev/null 2>&1; then
+      print -r -- '{"continue":false,"suppressOutput":true}'
+    fi
+    ;;
+esac
