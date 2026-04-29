@@ -27,7 +27,7 @@ find_current_claude_pid() {
 
 current_session_id() {
   local target=$1
-  local sid dir latest now mtime
+  local sid registry
 
   sid="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
   if [[ -n "$sid" ]]; then
@@ -35,23 +35,16 @@ current_session_id() {
     return 0
   fi
 
-  if command -v lsof >/dev/null 2>&1; then
-    sid=$(lsof -Fn -p "$target" 2>/dev/null | sed -n 's#^n.*/\.claude/projects/.*/\([^/]*\)\.jsonl$#\1#p' | head -n 1)
+  registry="$HOME/.claude/sessions/${target}.json"
+  if [[ -r "$registry" ]]; then
+    sid=$(grep -o '"sessionId":"[^"]*"' "$registry" 2>/dev/null | head -1 | sed 's/.*"sessionId":"//; s/"$//')
     if [[ -n "$sid" ]]; then
       print -r -- "$sid"
       return 0
     fi
   fi
 
-  dir="$HOME/.claude/projects/$(print -r -- "$PWD" | tr '/' '-')"
-  latest=$(ls -t "$dir"/*.jsonl(N) 2>/dev/null | head -n 1)
-  [[ -n "$latest" ]] || return 1
-
-  now=$(date +%s)
-  mtime=$(stat -f '%m' "$latest" 2>/dev/null || true)
-  [[ -n "$mtime" && $((now - mtime)) -le ${CLAUDE_RESTART_RECENT_SECONDS:-20} ]] || return 1
-
-  print -r -- "${latest:t:r}"
+  return 1
 }
 
 target=$(find_current_claude_pid) || {
