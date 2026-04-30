@@ -1,8 +1,6 @@
 # Claude Code /restart support.
 #
-# Source this file from ~/.zshrc and start Claude through `cc` or `claude`.
-
-alias cc="claude code"
+# Source this file from ~/.zshrc and start Claude through `claude`.
 
 claude() {
   local restart_dir="${TMPDIR:-/tmp}/claude-code-restart"

@@ -15,7 +15,7 @@ current Claude Code process and resumes the same session when possible.
 - `~/.claude/commands/restart.md`
   - Fallback slash command implementation.
 - `~/.claude/claude-restart-wrapper.zsh`
-  - Defines `claude()` and `cc`.
+  - Defines `claude()` wrapper function.
   - Relaunches `claude --resume <session_id>` when the restart marker asks for it.
 
 ## Install
@@ -30,7 +30,7 @@ source ~/.zshrc
 Start Claude Code through the wrapper:
 
 ```sh
-cc
+claude
 ```
 
 ## Behavior
@@ -53,4 +53,4 @@ export CLAUDE_RESTART_LOG=/tmp/claude-restart.log
 - macOS and zsh are assumed.
 - `jq` is optional but recommended for the fast prompt hook.
 - If Claude Code is already running from an older shell that did not source the
-  wrapper, start a new shell or run `source ~/.zshrc` before launching `cc`.
+  wrapper, start a new shell or run `source ~/.zshrc` before launching `claude`.
