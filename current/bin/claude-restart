@@ -48,23 +48,30 @@ current_session_id() {
 }
 
 restart_claude() {
-  local target flag managed_restart launcher sid marker
+  local target flag sid marker
 
   target=$(find_current_claude_pid) || {
     print -u2 -- "claude not found in ancestor chain"
     return 1
   }
 
+  # Refuse to act if not launched via the shell wrapper.
+  # Without the wrapper there is no supervisor to relaunch claude after we
+  # kill it — the terminal would be left in a broken state.
   flag="${CLAUDE_RESTART_FLAG:-}"
-  managed_restart=1
   if [[ -z "$flag" ]]; then
-    managed_restart=0
-    launcher=$(ps -o ppid= -p "$target" 2>/dev/null | tr -d ' ')
-    [[ -n "$launcher" ]] || {
-      print -u2 -- "claude launcher not found"
-      return 1
-    }
-    flag="${TMPDIR:-/tmp}/claude-code-restart/${launcher}.restart"
+    print -u2 -- ""
+    print -u2 -- "  /restart is not available in this Claude Code session."
+    print -u2 -- ""
+    print -u2 -- "  This session was started without the restart wrapper, so there is"
+    print -u2 -- "  no supervisor to relaunch claude after restart. Killing it now"
+    print -u2 -- "  would leave the terminal in a broken state."
+    print -u2 -- ""
+    print -u2 -- "  Likely cause: this session was started before \`source ~/.zshrc\`"
+    print -u2 -- "  loaded the wrapper. To use /restart: exit (Ctrl+D), then start a"
+    print -u2 -- "  new \`claude\` session."
+    print -u2 -- ""
+    return 1
   fi
 
   mkdir -p "${flag:h}" 2>/dev/null
@@ -79,26 +86,6 @@ restart_claude() {
     print -u2 -- "failed to write restart marker: $flag"
     return 1
   }
-
-  if [[ "$managed_restart" -eq 0 ]]; then
-    if [[ "$marker" == "fresh" ]]; then
-      kill -TERM "$target" 2>/dev/null || {
-        rm -f "$flag" 2>/dev/null
-        print -u2 -- "failed to signal claude pid $target"
-        return 1
-      }
-      print -r -- "Closed empty Claude Code session. Start cc again after loading the updated shell wrapper."
-      return 0
-    fi
-
-    kill -KILL "$target" 2>/dev/null || {
-      rm -f "$flag" 2>/dev/null
-      print -u2 -- "failed to signal claude pid $target"
-      return 1
-    }
-    print -r -- "Restarting Claude Code..."
-    return 0
-  fi
 
   (
     sleep "${CLAUDE_RESTART_FORCE_AFTER:-3}"
