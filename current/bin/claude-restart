@@ -47,8 +47,22 @@ current_session_id() {
   return 1
 }
 
+refuse_unmanaged() {
+  print -u2 -- ""
+  print -u2 -- "  /restart is not available in this Claude Code session."
+  print -u2 -- ""
+  print -u2 -- "  This session was started without the restart wrapper, so there is"
+  print -u2 -- "  no supervisor to relaunch claude after restart. Killing it now"
+  print -u2 -- "  would leave the terminal in a broken state."
+  print -u2 -- ""
+  print -u2 -- "  Likely cause: this session was started before \`source ~/.zshrc\`"
+  print -u2 -- "  loaded the wrapper. To use /restart: exit (Ctrl+D), then start a"
+  print -u2 -- "  new \`claude\` session."
+  print -u2 -- ""
+}
+
 restart_claude() {
-  local target flag sid marker
+  local target flag sid marker parent expected_basename
 
   target=$(find_current_claude_pid) || {
     print -u2 -- "claude not found in ancestor chain"
@@ -58,19 +72,23 @@ restart_claude() {
   # Refuse to act if not launched via the shell wrapper.
   # Without the wrapper there is no supervisor to relaunch claude after we
   # kill it — the terminal would be left in a broken state.
+  #
+  # The wrapper sets CLAUDE_RESTART_FLAG to "${restart_dir}/${wrapper_pid}.restart"
+  # where wrapper_pid is claude's parent PID. We verify both:
+  #   1. The variable is set
+  #   2. The flag's basename matches claude's actual parent PID
+  # This prevents a stray exported CLAUDE_RESTART_FLAG (from SSH env forwarding,
+  # tmux, manual export, etc.) from tricking us into killing an unmanaged claude.
   flag="${CLAUDE_RESTART_FLAG:-}"
   if [[ -z "$flag" ]]; then
-    print -u2 -- ""
-    print -u2 -- "  /restart is not available in this Claude Code session."
-    print -u2 -- ""
-    print -u2 -- "  This session was started without the restart wrapper, so there is"
-    print -u2 -- "  no supervisor to relaunch claude after restart. Killing it now"
-    print -u2 -- "  would leave the terminal in a broken state."
-    print -u2 -- ""
-    print -u2 -- "  Likely cause: this session was started before \`source ~/.zshrc\`"
-    print -u2 -- "  loaded the wrapper. To use /restart: exit (Ctrl+D), then start a"
-    print -u2 -- "  new \`claude\` session."
-    print -u2 -- ""
+    refuse_unmanaged
+    return 1
+  fi
+
+  parent=$(ps -o ppid= -p "$target" 2>/dev/null | tr -d ' ')
+  expected_basename="${parent}.restart"
+  if [[ -z "$parent" || "${flag:t}" != "$expected_basename" ]]; then
+    refuse_unmanaged
     return 1
   fi
 
@@ -122,8 +140,18 @@ handle_hook() {
 
   case "$prompt" in
     /restart|/restart\ *)
-      if CLAUDE_SESSION_ID="$session_id" restart_claude >> "${CLAUDE_RESTART_LOG:-/dev/null}" 2>&1; then
+      local out rc
+      out=$(CLAUDE_SESSION_ID="$session_id" restart_claude 2>&1)
+      rc=$?
+      [[ -n "${CLAUDE_RESTART_LOG:-}" ]] && print -r -- "$out" >> "$CLAUDE_RESTART_LOG"
+
+      if (( rc == 0 )); then
+        # success — let wrapper handle the relaunch, suppress prompt
         print -r -- '{"continue":false,"suppressOutput":true}'
+      else
+        # failure — block the prompt and show the refusal to the user
+        print -r -- "$out" >&2
+        print -r -- '{"continue":false,"suppressOutput":false}'
       fi
       ;;
   esac
