@@ -140,7 +140,7 @@ handle_hook() {
 
   case "$prompt" in
     /restart|/restart\ *)
-      local out rc
+      local out rc reason
       out=$(CLAUDE_SESSION_ID="$session_id" restart_claude 2>&1)
       rc=$?
       [[ -n "${CLAUDE_RESTART_LOG:-}" ]] && print -r -- "$out" >> "$CLAUDE_RESTART_LOG"
@@ -149,9 +149,18 @@ handle_hook() {
         # success — let wrapper handle the relaunch, suppress prompt
         print -r -- '{"continue":false,"suppressOutput":true}'
       else
-        # failure — block the prompt and show the refusal to the user
-        print -r -- "$out" >&2
-        print -r -- '{"continue":false,"suppressOutput":false}'
+        # failure — block the prompt and show the refusal to the user via
+        # decision:block + reason (the documented UserPromptSubmit channel)
+        if command -v jq >/dev/null 2>&1; then
+          reason=$(print -rn -- "$out" | jq -Rs .)
+        else
+          # fallback: minimal escaping for the message we control
+          reason=${out//\\/\\\\}
+          reason=${reason//\"/\\\"}
+          reason=${reason//$'\n'/\\n}
+          reason="\"${reason}\""
+        fi
+        printf '{"decision":"block","reason":%s}\n' "$reason"
       fi
       ;;
   esac
